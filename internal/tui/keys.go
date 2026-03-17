@@ -22,6 +22,9 @@ type keyMap struct {
 	Edit     key.Binding
 	Versions key.Binding
 	Copy     key.Binding
+	Wrap     key.Binding
+	Unwrap   key.Binding
+	WrapView key.Binding
 }
 
 var keys = keyMap{
@@ -88,5 +91,17 @@ var keys = keyMap{
 	Copy: key.NewBinding(
 		key.WithKeys("c"),
 		key.WithHelp("c", "copy secret"),
+	),
+	Wrap: key.NewBinding(
+		key.WithKeys("w"),
+		key.WithHelp("w", "wrap"),
+	),
+	Unwrap: key.NewBinding(
+		key.WithKeys("u"),
+		key.WithHelp("u", "unwrap"),
+	),
+	WrapView: key.NewBinding(
+		key.WithKeys("W"),
+		key.WithHelp("W", "wrap/unwrap view"),
 	),
 }

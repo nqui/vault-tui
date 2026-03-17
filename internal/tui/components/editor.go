@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/nq/hv-tui/internal/tui/theme"
 )
 
 type editorMode int
@@ -23,15 +24,17 @@ type kvRow struct {
 }
 
 type EditorModel struct {
-	pathInput textinput.Model
-	rows      []kvRow
-	mode      editorMode
-	active    bool
-	focusIdx  int
-	width     int
-	height    int
-	engine    string
-	kvVersion int
+	pathInput      textinput.Model
+	rows           []kvRow
+	rowOffset      int
+	maxVisibleRows int
+	mode           editorMode
+	active         bool
+	focusIdx       int
+	width          int
+	height         int
+	engine         string
+	kvVersion      int
 
 	Save      key.Binding
 	AddRow    key.Binding
@@ -51,7 +54,7 @@ func NewEditor() EditorModel {
 		Save:      key.NewBinding(key.WithKeys("ctrl+s")),
 		AddRow:    key.NewBinding(key.WithKeys("ctrl+n")),
 		RemoveRow: key.NewBinding(key.WithKeys("ctrl+d")),
-		Cancel:    key.NewBinding(key.WithKeys("esc")),
+		Cancel:    key.NewBinding(key.WithKeys("esc", "ctrl+c")),
 		NextField: key.NewBinding(key.WithKeys("tab")),
 		PrevField: key.NewBinding(key.WithKeys("shift+tab")),
 	}
@@ -136,6 +139,12 @@ func (m *EditorModel) SetSize(w, h int) {
 		m.rows[i].key.SetWidth(inputWidth / 3)
 		m.rows[i].value.SetWidth(inputWidth * 2 / 3)
 	}
+
+	// Chrome: title(1) + sep(1) + blank(1) + path(2-3) + blank(1) + "Data"(1) + blank(1) + [rows] + blank(1) + sep(1) + hints(1) + border/padding(4) = ~16
+	m.maxVisibleRows = h - 16
+	if m.maxVisibleRows < 3 {
+		m.maxVisibleRows = 3
+	}
 }
 
 func (m EditorModel) Update(msg tea.Msg) (EditorModel, tea.Cmd) {
@@ -162,7 +171,7 @@ func (m EditorModel) Update(msg tea.Msg) (EditorModel, tea.Cmd) {
 				}
 			}
 		case key.Matches(msg, m.NextField):
-			maxIdx := len(m.rows)*2
+			maxIdx := len(m.rows) * 2
 			if m.mode == EditorCreate {
 				maxIdx++ // include path field
 			}
@@ -172,7 +181,7 @@ func (m EditorModel) Update(msg tea.Msg) (EditorModel, tea.Cmd) {
 			}
 			return m, m.updateFocus()
 		case key.Matches(msg, m.PrevField):
-			maxIdx := len(m.rows)*2
+			maxIdx := len(m.rows) * 2
 			if m.mode == EditorCreate {
 				maxIdx++
 			}
@@ -207,32 +216,34 @@ func (m EditorModel) View() string {
 		return ""
 	}
 
+	t := theme.Active
+
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#BB9AF7")).
+		Foreground(t.Primary).
 		Bold(true)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#7AA2F7")).
+		Foreground(t.Blue).
 		Bold(true)
 
 	pathDisplayStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#C0CAF5"))
+		Foreground(t.Text)
 
 	separatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#414868"))
+		Foreground(t.Overlay)
 
 	rowNumStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#565F89"))
+		Foreground(t.Subtle)
 
 	eqStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#414868"))
+		Foreground(t.Overlay)
 
 	hintKeyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#BB9AF7")).
+		Foreground(t.Primary).
 		Bold(true)
 
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#565F89"))
+		Foreground(t.Subtle)
 
 	var b strings.Builder
 
@@ -262,17 +273,38 @@ func (m EditorModel) View() string {
 		b.WriteString("\n\n")
 	}
 
+	scrollIndicator := lipgloss.NewStyle().
+		Foreground(t.Subtle).
+		Italic(true)
+
 	b.WriteString(labelStyle.Render("  Data"))
+	if len(m.rows) > m.maxVisibleRows {
+		b.WriteString(scrollIndicator.Render(fmt.Sprintf("  (%d/%d)", m.currentRowIdx()+1, len(m.rows))))
+	}
 	b.WriteString("\n\n")
-	for i, row := range m.rows {
+
+	end := m.rowOffset + m.maxVisibleRows
+	if end > len(m.rows) {
+		end = len(m.rows)
+	}
+	if m.rowOffset > 0 {
+		b.WriteString(scrollIndicator.Render("     ↑ more"))
+		b.WriteByte('\n')
+	}
+	for i := m.rowOffset; i < end; i++ {
+		row := m.rows[i]
 		num := fmt.Sprintf("  %2d ", i+1)
 		b.WriteString(rowNumStyle.Render(num))
 		b.WriteString(row.key.View())
 		b.WriteString(eqStyle.Render("  =  "))
 		b.WriteString(row.value.View())
-		if i < len(m.rows)-1 {
+		if i < end-1 {
 			b.WriteByte('\n')
 		}
+	}
+	if end < len(m.rows) {
+		b.WriteByte('\n')
+		b.WriteString(scrollIndicator.Render("     ↓ more"))
 	}
 
 	b.WriteString("\n\n")
@@ -286,7 +318,7 @@ func (m EditorModel) View() string {
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#BB9AF7")).
+		BorderForeground(t.Primary).
 		Padding(1, 2).
 		Width(m.width - 4)
 
@@ -319,6 +351,22 @@ func (m EditorModel) currentRowIdx() int {
 	return (m.focusIdx - 1) / 2
 }
 
+func (m *EditorModel) fixRowOffset() {
+	rowIdx := m.currentRowIdx()
+	if rowIdx < 0 {
+		return
+	}
+	if rowIdx < m.rowOffset {
+		m.rowOffset = rowIdx
+	}
+	if rowIdx >= m.rowOffset+m.maxVisibleRows {
+		m.rowOffset = rowIdx - m.maxVisibleRows + 1
+	}
+	if m.rowOffset < 0 {
+		m.rowOffset = 0
+	}
+}
+
 func (m *EditorModel) updateFocus() tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -327,6 +375,8 @@ func (m *EditorModel) updateFocus() tea.Cmd {
 		m.rows[i].key.Blur()
 		m.rows[i].value.Blur()
 	}
+
+	m.fixRowOffset()
 
 	if m.focusIdx == 0 {
 		cmds = append(cmds, m.pathInput.Focus())

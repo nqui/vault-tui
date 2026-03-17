@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
+	"github.com/nq/hv-tui/internal/tui/theme"
 	"github.com/nq/hv-tui/internal/vault"
 )
 
@@ -76,8 +77,9 @@ func (m *DetailModel) ShowError(err error) {
 	m.state = detailError
 	m.errMsg = err.Error()
 
-	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E"))
-	msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89"))
+	t := theme.Active
+	errStyle := lipgloss.NewStyle().Foreground(t.Red)
+	msgStyle := lipgloss.NewStyle().Foreground(t.Subtle)
 	m.viewport.SetContent(errStyle.Render("  Error") + "\n\n  " + msgStyle.Render(m.errMsg))
 }
 
@@ -85,11 +87,12 @@ func (m *DetailModel) ShowDenied(path string) {
 	m.state = detailError
 	m.secret = nil
 
-	pathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#BB9AF7")).Bold(true)
-	iconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E"))
-	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E")).Bold(true)
-	msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89"))
-	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#414868"))
+	t := theme.Active
+	pathStyle := lipgloss.NewStyle().Foreground(t.Primary).Bold(true)
+	iconStyle := lipgloss.NewStyle().Foreground(t.Red)
+	titleStyle := lipgloss.NewStyle().Foreground(t.Red).Bold(true)
+	msgStyle := lipgloss.NewStyle().Foreground(t.Subtle)
+	dividerStyle := lipgloss.NewStyle().Foreground(t.Overlay)
 
 	content := "  " + pathStyle.Render(path) + "\n" +
 		"  " + dividerStyle.Render(strings.Repeat("─", 38)) + "\n\n" +
@@ -144,11 +147,12 @@ func (m DetailModel) Update(msg tea.Msg) (DetailModel, tea.Cmd) {
 
 func (m DetailModel) View() string {
 	if m.state == detailEmpty {
+		t := theme.Active
 		hint := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#565F89")).
+			Foreground(t.Subtle).
 			Italic(true)
 		icon := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#414868"))
+			Foreground(t.Overlay)
 
 		content := icon.Render("  ◇") + "  " + hint.Render("Navigate the tree and select a secret")
 		return content

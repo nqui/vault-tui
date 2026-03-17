@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/nq/hv-tui/internal/config"
 	"github.com/nq/hv-tui/internal/tui"
+	"github.com/nq/hv-tui/internal/tui/theme"
 	"github.com/nq/hv-tui/internal/vault"
 )
 
@@ -16,6 +17,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+
+	if err := theme.Set(cfg.Theme); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	tui.InitStyles()
 
 	client, err := vault.New(cfg.Addr, cfg.Token)
 	if err != nil {

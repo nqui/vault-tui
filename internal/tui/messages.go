@@ -37,4 +37,16 @@ type VersionsLoadedMsg struct {
 	Err      error
 }
 
+type SecretWrappedMsg struct {
+	Path  string
+	Token string
+	TTL   string
+	Err   error
+}
+
+type SecretUnwrappedMsg struct {
+	Data map[string]interface{}
+	Err  error
+}
+
 type ClearErrorMsg struct{}

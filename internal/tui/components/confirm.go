@@ -4,6 +4,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/nq/hv-tui/internal/tui/theme"
 )
 
 type ConfirmResult struct {
@@ -46,7 +47,7 @@ func (m ConfirmModel) Update(msg tea.Msg) (ConfirmModel, tea.Cmd) {
 	}
 
 	yes := key.NewBinding(key.WithKeys("y"))
-	no := key.NewBinding(key.WithKeys("n", "esc"))
+	no := key.NewBinding(key.WithKeys("n", "esc", "ctrl+c"))
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -72,22 +73,24 @@ func (m ConfirmModel) View() string {
 		return ""
 	}
 
+	t := theme.Active
+
 	iconStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F7768E"))
+		Foreground(t.Red)
 
 	msgStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#C0CAF5"))
+		Foreground(t.Text)
 
 	hintKeyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F7768E")).
+		Foreground(t.Red).
 		Bold(true)
 
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#565F89"))
+		Foreground(t.Subtle)
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#F7768E")).
+		BorderForeground(t.Red).
 		Padding(1, 3).
 		Width(m.width - 4)
 

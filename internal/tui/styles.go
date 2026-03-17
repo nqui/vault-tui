@@ -2,72 +2,76 @@ package tui
 
 import (
 	"charm.land/lipgloss/v2"
+	"github.com/nq/hv-tui/internal/tui/theme"
 )
 
 var (
-	colorBg      = lipgloss.Color("#1A1B26")
-	colorSurface = lipgloss.Color("#24283B")
-	colorOverlay = lipgloss.Color("#414868")
-	colorSubtle  = lipgloss.Color("#565F89")
-	colorText    = lipgloss.Color("#C0CAF5")
-	colorBright  = lipgloss.Color("#E0E0FF")
-	colorPurple  = lipgloss.Color("#BB9AF7")
-	colorBlue    = lipgloss.Color("#7AA2F7")
-	colorCyan    = lipgloss.Color("#7DCFFF")
-	colorGreen   = lipgloss.Color("#9ECE6A")
-	colorYellow  = lipgloss.Color("#E0AF68")
-	colorRed     = lipgloss.Color("#F7768E")
-	colorOrange  = lipgloss.Color("#FF9E64")
+	titleBarStyle     lipgloss.Style
+	titleBarInfoStyle lipgloss.Style
+	focusedBorder     lipgloss.Style
+	unfocusedBorder   lipgloss.Style
+	paneHeaderStyle   lipgloss.Style
+	statusBarBg       lipgloss.Style
+	statusKeyStyle    lipgloss.Style
+	statusDescStyle   lipgloss.Style
+	statusMsgStyle    lipgloss.Style
+	statusErrStyle    lipgloss.Style
+)
+
+// InitStyles rebuilds all module-level styles from the active theme.
+// Must be called after theme.Set().
+func InitStyles() {
+	t := theme.Active
 
 	titleBarStyle = lipgloss.NewStyle().
-			Background(colorPurple).
-			Foreground(lipgloss.Color("#1A1B26")).
-			Bold(true).
-			PaddingLeft(2).
-			PaddingRight(2)
+		Background(t.Primary).
+		Foreground(t.Bg).
+		Bold(true).
+		PaddingLeft(2).
+		PaddingRight(2)
 
 	titleBarInfoStyle = lipgloss.NewStyle().
-				Background(colorSurface).
-				Foreground(colorSubtle).
-				PaddingLeft(1).
-				PaddingRight(1)
+		Background(t.Surface).
+		Foreground(t.Subtle).
+		PaddingLeft(1).
+		PaddingRight(1)
 
 	focusedBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorPurple)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Primary)
 
 	unfocusedBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorOverlay)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Overlay)
 
 	paneHeaderStyle = lipgloss.NewStyle().
-			Foreground(colorPurple).
-			Bold(true).
-			PaddingBottom(1)
+		Foreground(t.Primary).
+		Bold(true).
+		PaddingBottom(1)
 
 	statusBarBg = lipgloss.NewStyle().
-			Background(colorSurface)
+		Background(t.Surface)
 
 	statusKeyStyle = lipgloss.NewStyle().
-			Background(colorOverlay).
-			Foreground(colorBright).
-			Bold(true).
-			PaddingLeft(1).
-			PaddingRight(1)
+		Background(t.Overlay).
+		Foreground(t.Bright).
+		Bold(true).
+		PaddingLeft(1).
+		PaddingRight(1)
 
 	statusDescStyle = lipgloss.NewStyle().
-			Background(colorSurface).
-			Foreground(colorSubtle).
-			PaddingRight(2)
+		Background(t.Surface).
+		Foreground(t.Subtle).
+		PaddingRight(2)
 
 	statusMsgStyle = lipgloss.NewStyle().
-			Background(colorSurface).
-			Foreground(colorGreen).
-			PaddingLeft(1)
+		Background(t.Surface).
+		Foreground(t.Green).
+		PaddingLeft(1)
 
 	statusErrStyle = lipgloss.NewStyle().
-			Background(colorSurface).
-			Foreground(colorRed).
-			Bold(true).
-			PaddingLeft(1)
-)
+		Background(t.Surface).
+		Foreground(t.Red).
+		Bold(true).
+		PaddingLeft(1)
+}

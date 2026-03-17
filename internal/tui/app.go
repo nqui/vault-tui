@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/nq/hv-tui/internal/tui/components"
+	"github.com/nq/hv-tui/internal/tui/theme"
 	"github.com/nq/hv-tui/internal/vault"
 )
 
@@ -30,6 +31,16 @@ const (
 	modeBrowse appMode = iota
 	modeEdit
 	modeConfirmDelete
+	modeWrapTTL
+	modeWrapResult
+	modeUnwrap
+)
+
+type appView int
+
+const (
+	viewSecrets appView = iota
+	viewWrap
 )
 
 type App struct {
@@ -41,8 +52,20 @@ type App struct {
 	statusbar components.StatusBarModel
 	spinner   spinner.Model
 
+	// Wrap/unwrap components
+	prompt     components.PromptModel
+	picker     components.PickerModel
+	wrapResult components.WrapResultModel
+	wrapView   components.WrapViewModel
+
+	// Wrap state for async boundary
+	wrapEngine string
+	wrapPath   string
+	wrapKVVer  int
+
 	activePane pane
 	mode       appMode
+	view       appView
 	width      int
 	height     int
 	loading    int
@@ -53,7 +76,7 @@ type App struct {
 func NewApp(client *vault.Client) *App {
 	sp := spinner.New(
 		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(lipgloss.NewStyle().Foreground(colorPurple)),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(theme.Active.Primary)),
 	)
 
 	sb := components.NewStatusBar()
@@ -69,10 +92,15 @@ func NewApp(client *vault.Client) *App {
 		detail:     components.NewDetail(),
 		editor:     components.NewEditor(),
 		confirm:    components.NewConfirm(),
+		prompt:     components.NewPrompt(),
+		picker:     components.NewPicker(),
+		wrapResult: components.NewWrapResult(),
+		wrapView:   components.NewWrapView(),
 		statusbar:  sb,
 		spinner:    sp,
 		activePane: paneTree,
 		mode:       modeBrowse,
+		view:       viewSecrets,
 		vaultAddr:  client.Addr(),
 	}
 }
@@ -213,6 +241,44 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail.ShowVersions(msg.Versions, msg.Path)
 		return m, nil
 
+	case SecretWrappedMsg:
+		m.loading--
+		if msg.Err != nil {
+			m.setError(msg.Err)
+			m.mode = modeBrowse
+			return m, m.clearErrorAfter(5 * time.Second)
+		}
+		m.mode = modeWrapResult
+		m.wrapResult.SetWidth(m.width * 2 / 3)
+		m.wrapResult.Show(msg.Token, msg.TTL, msg.Path)
+		return m, nil
+
+	case SecretUnwrappedMsg:
+		m.loading--
+		if msg.Err != nil {
+			m.setError(msg.Err)
+			if m.view == viewWrap {
+				m.wrapView.SetUnwrapResult("Error: "+msg.Err.Error(), "")
+			}
+			m.mode = modeBrowse
+			return m, m.clearErrorAfter(5 * time.Second)
+		}
+		if m.view == viewWrap {
+			m.wrapView.SetUnwrapResult(formatKVDisplay(msg.Data), formatKVCopy(msg.Data))
+			m.mode = modeBrowse
+			return m, nil
+		}
+		// Quick unwrap: show in detail pane
+		m.prompt.Close()
+		entry := &vault.SecretEntry{
+			Path: "(unwrapped)",
+			Data: msg.Data,
+		}
+		m.detail.ShowSecret(entry)
+		m.mode = modeBrowse
+		m.statusbar.SetMessage("Token unwrapped successfully")
+		return m, m.clearErrorAfter(3 * time.Second)
+
 	case components.ConfirmResult:
 		if msg.Confirmed {
 			node := m.tree.Selected()
@@ -224,25 +290,116 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeBrowse
 		return m, nil
 
+	case components.PickerResult:
+		m.mode = modeBrowse
+		if msg.Cancelled {
+			return m, nil
+		}
+		if msg.Context == "wrap_ttl" {
+			return m, m.wrapSecret(m.wrapEngine, m.wrapPath, m.wrapKVVer, msg.Value)
+		}
+		return m, nil
+
+	case components.PromptResult:
+		if msg.Cancelled {
+			m.mode = modeBrowse
+			return m, nil
+		}
+		switch msg.Context {
+		case "unwrap_token":
+			token := strings.TrimSpace(msg.Value)
+			if token == "" {
+				m.mode = modeBrowse
+				return m, nil
+			}
+			m.mode = modeBrowse
+			return m, m.unwrapToken(token)
+		}
+		m.mode = modeBrowse
+		return m, nil
+
+	case components.WrapResultDismissed:
+		m.mode = modeBrowse
+		if msg.CopyToken {
+			if err := clipboard.WriteAll(msg.Token); err != nil {
+				m.statusbar.SetError(fmt.Errorf("copy failed: %v", err))
+			} else {
+				m.statusbar.SetMessage("Wrapping token copied to clipboard")
+			}
+			return m, m.clearErrorAfter(3 * time.Second)
+		}
+		return m, nil
+
+	case components.WrapDataMsg:
+		return m, m.wrapData(msg.Data, msg.TTL)
+
+	case components.UnwrapTokenMsg:
+		return m, m.unwrapToken(msg.Token)
+
+	case components.WrapViewCopyMsg:
+		if err := clipboard.WriteAll(msg.Content); err != nil {
+			m.statusbar.SetError(fmt.Errorf("copy failed: %v", err))
+		} else {
+			m.statusbar.SetMessage("Unwrapped data copied to clipboard")
+		}
+		return m, m.clearErrorAfter(3 * time.Second)
+
+	case components.WrapViewDuplicateKeyMsg:
+		m.statusbar.SetError(fmt.Errorf("duplicate key: %q", msg.Key))
+		return m, m.clearErrorAfter(3 * time.Second)
+
 	case tea.KeyPressMsg:
+		// Modal modes first
 		switch m.mode {
 		case modeEdit:
 			return m.updateEditor(msg)
 		case modeConfirmDelete:
 			return m.updateConfirm(msg)
+		case modeWrapTTL:
+			return m.updatePicker(msg)
+		case modeUnwrap:
+			return m.updatePrompt(msg)
+		case modeWrapResult:
+			return m.updateWrapResult(msg)
 		}
 
+		// Global keys
 		switch {
 		case key.Matches(msg, keys.Quit):
-			return m, tea.Quit
+			if m.view != viewWrap {
+				return m, tea.Quit
+			}
+		case key.Matches(msg, keys.WrapView):
+			if m.view == viewWrap {
+				m.view = viewSecrets
+				m.statusbar.SetHints(components.SecretsViewHints)
+			} else {
+				m.view = viewWrap
+				m.statusbar.SetHints(components.WrapViewHints)
+				m.wrapView.SetSize(m.width, m.height)
+				cmds = append(cmds, m.wrapView.Open())
+			}
+			return m, tea.Batch(cmds...)
+		}
+
+		// View-specific handling
+		if m.view == viewWrap {
+			return m.updateWrapView(msg)
+		}
+
+		// Secrets view keys
+		switch {
 		case key.Matches(msg, keys.SwitchPane):
 			m.switchPane()
 			return m, nil
 		case key.Matches(msg, keys.Help):
-			// TODO: help overlay
 			return m, nil
 		case key.Matches(msg, keys.Copy):
 			return m, m.copySecret()
+		case key.Matches(msg, keys.Wrap):
+			return m.startQuickWrap()
+		case key.Matches(msg, keys.Unwrap):
+			return m.startQuickUnwrap()
 		}
 
 		if m.activePane == paneTree {
@@ -251,7 +408,16 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateDetail(msg)
 	}
 
+	// Forward non-key messages to active components
 	var cmd tea.Cmd
+	if m.view == viewWrap {
+		m.wrapView, cmd = m.wrapView.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+	if m.mode == modeUnwrap {
+		m.prompt, cmd = m.prompt.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 	m.detail, cmd = m.detail.Update(msg)
 	cmds = append(cmds, cmd)
 
@@ -263,13 +429,19 @@ func (m *App) View() tea.View {
 		return tea.NewView("Loading...")
 	}
 
+	// Title bar with view indicator
+	viewLabel := " Secrets "
+	if m.view == viewWrap {
+		viewLabel = " Wrap/Unwrap "
+	}
 	title := titleBarStyle.Render(" hv-tui ")
+	viewTag := titleBarInfoStyle.Render(viewLabel)
 	addr := titleBarInfoStyle.Render(m.vaultAddr)
-	titlePad := m.width - lipgloss.Width(title) - lipgloss.Width(addr)
+	titlePad := m.width - lipgloss.Width(title) - lipgloss.Width(viewTag) - lipgloss.Width(addr)
 	if titlePad < 0 {
 		titlePad = 0
 	}
-	titleBar := title + titleBarInfoStyle.Width(titlePad).Render("") + addr
+	titleBar := title + viewTag + titleBarInfoStyle.Width(titlePad).Render("") + addr
 
 	var content string
 
@@ -278,8 +450,18 @@ func (m *App) View() tea.View {
 		content = m.renderEditorOverlay()
 	case modeConfirmDelete:
 		content = m.renderConfirmOverlay()
+	case modeWrapTTL:
+		content = m.renderPickerOverlay()
+	case modeUnwrap:
+		content = m.renderPromptOverlay()
+	case modeWrapResult:
+		content = m.renderWrapResultOverlay()
 	default:
-		content = m.renderBrowse()
+		if m.view == viewWrap {
+			content = m.wrapView.View()
+		} else {
+			content = m.renderBrowse()
+		}
 	}
 
 	statusBar := m.statusbar.View()
@@ -292,16 +474,16 @@ func (m *App) View() tea.View {
 }
 
 func (m *App) renderBrowse() string {
-	treeWidth := m.width*35/100 - 2
+	treeWidth := m.treeWidth()
 	detailWidth := m.width - treeWidth - 4
-	contentHeight := m.height - 4
+	contentHeight := m.contentHeight()
 	treeLabel := " Secrets"
 	detailLabel := " Details"
 	if m.activePane == paneTree {
 		treeLabel = paneHeaderStyle.Render(treeLabel)
-		detailLabel = lipgloss.NewStyle().Foreground(colorSubtle).Render(detailLabel)
+		detailLabel = lipgloss.NewStyle().Foreground(theme.Active.Subtle).Render(detailLabel)
 	} else {
-		treeLabel = lipgloss.NewStyle().Foreground(colorSubtle).Render(treeLabel)
+		treeLabel = lipgloss.NewStyle().Foreground(theme.Active.Subtle).Render(treeLabel)
 		detailLabel = paneHeaderStyle.Render(detailLabel)
 	}
 
@@ -342,6 +524,51 @@ func (m *App) renderConfirmOverlay() string {
 	return lipgloss.JoinVertical(lipgloss.Left, browse, confirm)
 }
 
+func (m *App) renderPickerOverlay() string {
+	contentHeight := m.contentHeight()
+	picker := m.picker.View()
+	return lipgloss.Place(m.width, contentHeight, lipgloss.Center, lipgloss.Center, picker)
+}
+
+func (m *App) renderPromptOverlay() string {
+	contentHeight := m.contentHeight()
+	prompt := m.prompt.View()
+	return lipgloss.Place(m.width, contentHeight, lipgloss.Center, lipgloss.Center, prompt)
+}
+
+func (m *App) renderWrapResultOverlay() string {
+	contentHeight := m.contentHeight()
+	result := m.wrapResult.View()
+	return lipgloss.Place(m.width, contentHeight, lipgloss.Center, lipgloss.Center, result)
+}
+
+func (m *App) startQuickWrap() (tea.Model, tea.Cmd) {
+	node := m.tree.Selected()
+	if node == nil || node.IsDir {
+		m.statusbar.SetMessage("Select a secret to wrap")
+		return m, m.clearErrorAfter(3 * time.Second)
+	}
+	secret := m.detail.Secret()
+	if secret == nil || secret.Path != node.Engine+node.FullPath {
+		m.statusbar.SetMessage("Load a secret first (press enter)")
+		return m, m.clearErrorAfter(3 * time.Second)
+	}
+	m.wrapEngine = node.Engine
+	m.wrapPath = strings.TrimSuffix(node.FullPath, "/")
+	m.wrapKVVer = node.KVVer
+	m.mode = modeWrapTTL
+	m.picker.SetWidth(m.width / 3)
+	m.picker.Show("Wrap TTL", []string{"5m", "15m", "30m", "1h", "6h", "24h"}, "wrap_ttl")
+	return m, nil
+}
+
+func (m *App) startQuickUnwrap() (tea.Model, tea.Cmd) {
+	m.mode = modeUnwrap
+	m.prompt.SetWidth(m.width / 2)
+	cmd := m.prompt.Show("Unwrap Token", "hvs.CAESI...", "unwrap_token")
+	return m, cmd
+}
+
 func (m *App) updateTree(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -355,7 +582,6 @@ func (m *App) updateTree(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if node.State == components.NodeExpanded {
 				m.tree.CollapseNode(node.ID)
 			} else if node.State == components.NodeCollapsed || node.State == components.NodeError {
-				// Allow retry on errored nodes
 				m.tree.SetNodeLoading(node.ID)
 				cmds = append(cmds, m.listPath(node))
 			}
@@ -457,7 +683,8 @@ func (m *App) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *App) updateEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if key.Matches(msg, m.editor.Cancel) {
+	ctrlC := key.NewBinding(key.WithKeys("ctrl+c"))
+	if key.Matches(msg, m.editor.Cancel) || key.Matches(msg, ctrlC) {
 		m.editor.Close()
 		m.mode = modeBrowse
 		return m, nil
@@ -489,6 +716,38 @@ func (m *App) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *App) updatePrompt(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.prompt, cmd = m.prompt.Update(msg)
+	return m, cmd
+}
+
+func (m *App) updatePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.picker, cmd = m.picker.Update(msg)
+	return m, cmd
+}
+
+func (m *App) updateWrapResult(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.wrapResult, cmd = m.wrapResult.Update(msg)
+	return m, cmd
+}
+
+func (m *App) updateWrapView(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Esc or ctrl+c returns to secrets view
+	ctrlC := key.NewBinding(key.WithKeys("ctrl+c"))
+	if key.Matches(msg, keys.Cancel) || key.Matches(msg, ctrlC) {
+		m.view = viewSecrets
+		m.statusbar.SetHints(components.SecretsViewHints)
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.wrapView, cmd = m.wrapView.Update(msg)
+	return m, cmd
+}
+
 func (m *App) switchPane() {
 	if m.activePane == paneTree {
 		m.activePane = paneDetail
@@ -501,16 +760,38 @@ func (m *App) switchPane() {
 	}
 }
 
-func (m *App) updateSizes() {
-	treeWidth := m.width*35/100 - 2
-	detailWidth := m.width - treeWidth - 6
-	contentHeight := m.height - 8
+func (m *App) treeWidth() int {
+	minW := m.width * 15 / 100
+	maxW := m.width * 40 / 100
+	w := m.tree.MaxVisibleWidth() + 4
+	if w < minW {
+		w = minW
+	}
+	if w > maxW {
+		w = maxW
+	}
+	return w
+}
 
-	m.tree.SetSize(treeWidth, contentHeight)
+func (m *App) contentHeight() int {
+	// title bar (1) + status bar (variable) + border padding (2)
+	return m.height - m.statusbar.Height() - 3
+}
+
+func (m *App) updateSizes() {
+	tw := m.treeWidth()
+	detailWidth := m.width - tw - 6
+	contentHeight := m.contentHeight() - 4
+
+	m.tree.SetSize(tw, contentHeight)
 	m.detail.SetSize(detailWidth, contentHeight)
 	m.statusbar.SetWidth(m.width)
 	m.editor.SetSize(m.width-4, m.height-6)
 	m.confirm.SetWidth(m.width / 2)
+	m.prompt.SetWidth(m.width / 2)
+	m.picker.SetWidth(m.width / 3)
+	m.wrapResult.SetWidth(m.width * 2 / 3)
+	m.wrapView.SetSize(m.width, m.height)
 }
 
 func (m *App) setError(err error) {
@@ -584,6 +865,46 @@ func (m *App) loadVersions(node *components.TreeNode) tea.Cmd {
 	}
 }
 
+func (m *App) wrapSecret(engine, path string, kvVersion int, ttl string) tea.Cmd {
+	m.loading++
+	client := m.vault
+	return func() tea.Msg {
+		result, err := client.WrapSecret(context.Background(), engine, path, kvVersion, ttl)
+		if err != nil {
+			return SecretWrappedMsg{Path: engine + path, Err: err}
+		}
+		return SecretWrappedMsg{
+			Path:  engine + path,
+			Token: result.Token,
+			TTL:   result.TTL,
+		}
+	}
+}
+
+func (m *App) wrapData(data map[string]interface{}, ttl string) tea.Cmd {
+	m.loading++
+	client := m.vault
+	return func() tea.Msg {
+		result, err := client.WrapData(context.Background(), data, ttl)
+		if err != nil {
+			return SecretWrappedMsg{Err: err}
+		}
+		return SecretWrappedMsg{
+			Token: result.Token,
+			TTL:   result.TTL,
+		}
+	}
+}
+
+func (m *App) unwrapToken(token string) tea.Cmd {
+	m.loading++
+	client := m.vault
+	return func() tea.Msg {
+		data, err := client.UnwrapToken(context.Background(), token)
+		return SecretUnwrappedMsg{Data: data, Err: err}
+	}
+}
+
 func (m *App) copySecret() tea.Cmd {
 	text := m.detail.SecretAsKeyValue()
 	if text == "" {
@@ -614,4 +935,51 @@ func findNodeByID(node *components.TreeNode, id string) *components.TreeNode {
 		}
 	}
 	return nil
+}
+
+func formatKVDisplay(data map[string]interface{}) string {
+	if len(data) == 0 {
+		return "(empty)"
+	}
+
+	keyStyle := lipgloss.NewStyle().Foreground(theme.Active.Yellow)
+	valueStyle := lipgloss.NewStyle().Foreground(theme.Active.Text)
+	divStyle := lipgloss.NewStyle().Foreground(theme.Active.Overlay)
+
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	maxKeyLen := 0
+	for _, k := range keys {
+		if len(k) > maxKeyLen {
+			maxKeyLen = len(k)
+		}
+	}
+
+	var b strings.Builder
+	for _, k := range keys {
+		v := fmt.Sprintf("%v", data[k])
+		padding := strings.Repeat(" ", maxKeyLen-len(k))
+		b.WriteString("  ")
+		b.WriteString(keyStyle.Render(k))
+		b.WriteString(padding)
+		b.WriteString(divStyle.Render("  │ "))
+		b.WriteString(valueStyle.Render(v))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func formatKVCopy(data map[string]interface{}) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for k, v := range data {
+		b.WriteString(fmt.Sprintf("%s=%v\n", k, v))
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

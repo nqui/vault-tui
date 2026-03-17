@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/nq/hv-tui/internal/tui/theme"
 )
 
 type TreeKeyMap struct {
@@ -29,28 +30,29 @@ type TreeStyles struct {
 }
 
 func DefaultTreeStyles() TreeStyles {
+	t := theme.Active
 	return TreeStyles{
 		Cursor: lipgloss.NewStyle().
-			Background(lipgloss.Color("#3B4261")).
-			Foreground(lipgloss.Color("#E0E0FF")).
+			Background(t.CursorBg).
+			Foreground(t.Bright).
 			Bold(true),
 		Directory: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7DCFFF")).
+			Foreground(t.Cyan).
 			Bold(true),
 		File: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#C0CAF5")),
+			Foreground(t.Text),
 		Loading: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#565F89")).
+			Foreground(t.Subtle).
 			Italic(true),
 		Engine: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#BB9AF7")).
+			Foreground(t.Primary).
 			Bold(true),
 		Dim: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#414868")),
+			Foreground(t.Overlay),
 		Denied: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#565F89")),
+			Foreground(t.Subtle),
 		DeniedBadge: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F7768E")),
+			Foreground(t.Red),
 	}
 }
 
@@ -326,6 +328,18 @@ func (m TreeModel) isLastChild(node *TreeNode) bool {
 	}
 	children := node.Parent.Children
 	return len(children) > 0 && children[len(children)-1].ID == node.ID
+}
+
+func (m TreeModel) MaxVisibleWidth() int {
+	maxW := 0
+	for _, node := range m.flatList {
+		// 2 chars per depth level for guides + 4 for icon/spacing + name length
+		w := node.Depth*2 + 4 + len(node.Name)
+		if w > maxW {
+			maxW = w
+		}
+	}
+	return maxW
 }
 
 func (m *TreeModel) Flatten() {
