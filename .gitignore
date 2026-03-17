@@ -1,3 +1,5 @@
 hv-tui
+hvt
 *.exe
 scripts/
+dist/
