@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/nq/hv-tui/internal/vault"
+	"github.com/nqui/vault-tui/internal/vault"
 )
 
 type EnginesLoadedMsg struct {
@@ -48,5 +48,23 @@ type SecretUnwrappedMsg struct {
 	Data map[string]interface{}
 	Err  error
 }
+
+type TokenValidatedMsg struct {
+	Info *vault.TokenInfo
+	Err  error
+}
+
+type LoginCompleteMsg struct {
+	Info *vault.TokenInfo
+	Save bool
+	Err  error
+}
+
+type TokenRenewedMsg struct {
+	Info *vault.TokenInfo
+	Err  error
+}
+
+type TokenRenewTickMsg struct{}
 
 type ClearErrorMsg struct{}

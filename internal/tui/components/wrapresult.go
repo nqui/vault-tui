@@ -4,7 +4,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/nq/hv-tui/internal/tui/theme"
+	"github.com/nqui/vault-tui/internal/tui/theme"
 )
 
 type WrapResultDismissed struct {

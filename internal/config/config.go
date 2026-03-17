@@ -21,12 +21,10 @@ type fileConfig struct {
 }
 
 func loadFromFile() (*fileConfig, error) {
-	home, err := os.UserHomeDir()
+	path, err := configPath()
 	if err != nil {
 		return nil, err
 	}
-
-	path := filepath.Join(home, ".config", "hv-tui", "config.toml")
 
 	var fc fileConfig
 	if _, err := toml.DecodeFile(path, &fc); err != nil {
@@ -63,9 +61,42 @@ func Load() (*Config, error) {
 	if cfg.Addr == "" {
 		return nil, fmt.Errorf("VAULT_ADDR is required (set in ~/.config/hv-tui/config.toml or VAULT_ADDR env var)")
 	}
-	if cfg.Token == "" {
-		return nil, fmt.Errorf("VAULT_TOKEN is required (set in ~/.config/hv-tui/config.toml or VAULT_TOKEN env var)")
+	return cfg, nil
+}
+
+func configPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "hv-tui", "config.toml"), nil
+}
+
+func Save(cfg *Config) error {
+	path, err := configPath()
+	if err != nil {
+		return err
 	}
 
-	return cfg, nil
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	fc := fileConfig{
+		VaultAddr:  cfg.Addr,
+		VaultToken: cfg.Token,
+		Theme:      cfg.Theme,
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("writing config file: %w", err)
+	}
+	defer f.Close()
+
+	if err := toml.NewEncoder(f).Encode(fc); err != nil {
+		return fmt.Errorf("encoding config file: %w", err)
+	}
+
+	return nil
 }

@@ -5,13 +5,23 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/nq/hv-tui/internal/config"
-	"github.com/nq/hv-tui/internal/tui"
-	"github.com/nq/hv-tui/internal/tui/theme"
-	"github.com/nq/hv-tui/internal/vault"
+	"github.com/nqui/vault-tui/internal/config"
+	"github.com/nqui/vault-tui/internal/tui"
+	"github.com/nqui/vault-tui/internal/tui/theme"
+	"github.com/nqui/vault-tui/internal/vault"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Printf("hvt %s (%s)\n", version, commit)
+		os.Exit(0)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -30,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(tui.NewApp(client))
+	p := tea.NewProgram(tui.NewApp(client, cfg))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

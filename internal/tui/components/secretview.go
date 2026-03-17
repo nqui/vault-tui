@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/nq/hv-tui/internal/tui/theme"
-	"github.com/nq/hv-tui/internal/vault"
+	"github.com/nqui/vault-tui/internal/tui/theme"
+	"github.com/nqui/vault-tui/internal/vault"
 )
 
 func svPathStyle() lipgloss.Style {

@@ -13,9 +13,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/nq/hv-tui/internal/tui/components"
-	"github.com/nq/hv-tui/internal/tui/theme"
-	"github.com/nq/hv-tui/internal/vault"
+	"github.com/nqui/vault-tui/internal/config"
+	"github.com/nqui/vault-tui/internal/tui/components"
+	"github.com/nqui/vault-tui/internal/tui/theme"
+	"github.com/nqui/vault-tui/internal/vault"
 )
 
 type pane int
@@ -39,7 +40,8 @@ const (
 type appView int
 
 const (
-	viewSecrets appView = iota
+	viewLogin appView = iota
+	viewSecrets
 	viewWrap
 )
 
@@ -63,6 +65,11 @@ type App struct {
 	wrapPath   string
 	wrapKVVer  int
 
+	// Login
+	loginForm components.LoginFormModel
+	tokenInfo *vault.TokenInfo
+	cfg       *config.Config
+
 	activePane pane
 	mode       appMode
 	view       appView
@@ -73,7 +80,7 @@ type App struct {
 	vaultAddr  string
 }
 
-func NewApp(client *vault.Client) *App {
+func NewApp(client *vault.Client, cfg *config.Config) *App {
 	sp := spinner.New(
 		spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(lipgloss.NewStyle().Foreground(theme.Active.Primary)),
@@ -86,6 +93,11 @@ func NewApp(client *vault.Client) *App {
 	sb.MsgStyle = statusMsgStyle
 	sb.ErrStyle = statusErrStyle
 
+	startView := viewSecrets
+	if !client.HasToken() {
+		startView = viewLogin
+	}
+
 	return &App{
 		vault:      client,
 		tree:       components.NewTree(),
@@ -96,20 +108,26 @@ func NewApp(client *vault.Client) *App {
 		picker:     components.NewPicker(),
 		wrapResult: components.NewWrapResult(),
 		wrapView:   components.NewWrapView(),
+		loginForm:  components.NewLoginForm(),
 		statusbar:  sb,
 		spinner:    sp,
+		cfg:        cfg,
 		activePane: paneTree,
 		mode:       modeBrowse,
-		view:       viewSecrets,
+		view:       startView,
 		vaultAddr:  client.Addr(),
 	}
 }
 
 func (m *App) Init() tea.Cmd {
+	if m.view == viewLogin {
+		return m.loginForm.Show("")
+	}
+
 	m.tree.SetFocused(true)
 	return tea.Batch(
 		m.spinner.Tick,
-		m.loadEngines(),
+		m.validateToken(),
 	)
 }
 
@@ -131,6 +149,66 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ClearErrorMsg:
 		m.statusbar.ClearError()
 		m.lastErr = nil
+
+	case TokenValidatedMsg:
+		if msg.Err != nil {
+			m.view = viewLogin
+			return m, m.loginForm.Show("Token invalid or expired")
+		}
+		m.tokenInfo = msg.Info
+		cmds = append(cmds, m.loadEngines())
+		if msg.Info.Renewable && msg.Info.TTL > 0 {
+			cmds = append(cmds, m.scheduleRenewal(msg.Info.TTL))
+		}
+		return m, tea.Batch(cmds...)
+
+	case components.LoginFormResult:
+		if msg.Cancel {
+			return m, tea.Quit
+		}
+		m.loading++
+		return m, m.performLogin(msg)
+
+	case LoginCompleteMsg:
+		m.loading--
+		if msg.Err != nil {
+			m.loginForm.SetError(msg.Err.Error())
+			return m, nil
+		}
+		m.tokenInfo = msg.Info
+		m.vaultAddr = m.vault.Addr()
+		if msg.Save {
+			m.cfg.Token = msg.Info.Token
+			if err := config.Save(m.cfg); err != nil {
+				m.setError(fmt.Errorf("failed to save config: %w", err))
+			}
+		}
+		m.loginForm.Close()
+		m.view = viewSecrets
+		m.tree.SetFocused(true)
+		cmds = append(cmds, m.spinner.Tick, m.loadEngines())
+		if msg.Info.Renewable && msg.Info.TTL > 0 {
+			cmds = append(cmds, m.scheduleRenewal(msg.Info.TTL))
+		}
+		return m, tea.Batch(cmds...)
+
+	case TokenRenewTickMsg:
+		return m, m.renewToken()
+
+	case TokenRenewedMsg:
+		if msg.Err != nil {
+			if errors.Is(msg.Err, vault.ErrPermissionDenied) {
+				m.view = viewLogin
+				return m, m.loginForm.Show("Session expired — please re-authenticate")
+			}
+			// Non-fatal: log but don't disrupt
+			return m, nil
+		}
+		m.tokenInfo = msg.Info
+		if msg.Info.Renewable && msg.Info.TTL > 0 {
+			return m, m.scheduleRenewal(msg.Info.TTL)
+		}
+		return m, nil
 
 	case EnginesLoadedMsg:
 		m.loading--
@@ -349,6 +427,13 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.clearErrorAfter(3 * time.Second)
 
 	case tea.KeyPressMsg:
+		// Login view handles all its own keys
+		if m.view == viewLogin {
+			var cmd tea.Cmd
+			m.loginForm, cmd = m.loginForm.Update(msg)
+			return m, cmd
+		}
+
 		// Modal modes first
 		switch m.mode {
 		case modeEdit:
@@ -410,6 +495,11 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Forward non-key messages to active components
 	var cmd tea.Cmd
+	if m.view == viewLogin {
+		m.loginForm, cmd = m.loginForm.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+	}
 	if m.view == viewWrap {
 		m.wrapView, cmd = m.wrapView.Update(msg)
 		cmds = append(cmds, cmd)
@@ -427,6 +517,12 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *App) View() tea.View {
 	if m.width == 0 || m.height == 0 {
 		return tea.NewView("Loading...")
+	}
+
+	if m.view == viewLogin {
+		v := tea.NewView(m.loginForm.View())
+		v.AltScreen = true
+		return v
 	}
 
 	// Title bar with view indicator
@@ -792,6 +888,7 @@ func (m *App) updateSizes() {
 	m.picker.SetWidth(m.width / 3)
 	m.wrapResult.SetWidth(m.width * 2 / 3)
 	m.wrapView.SetSize(m.width, m.height)
+	m.loginForm.SetSize(m.width, m.height)
 }
 
 func (m *App) setError(err error) {
@@ -917,6 +1014,53 @@ func (m *App) copySecret() tea.Cmd {
 	}
 	m.statusbar.SetMessage("Copied to clipboard")
 	return m.clearErrorAfter(3 * time.Second)
+}
+
+func (m *App) validateToken() tea.Cmd {
+	client := m.vault
+	return func() tea.Msg {
+		info, err := client.ValidateToken(context.Background())
+		return TokenValidatedMsg{Info: info, Err: err}
+	}
+}
+
+func (m *App) performLogin(result components.LoginFormResult) tea.Cmd {
+	client := m.vault
+	save := result.Save
+	return func() tea.Msg {
+		ctx := context.Background()
+		var info *vault.TokenInfo
+		var err error
+
+		switch result.Method {
+		case components.AuthToken:
+			info, err = client.LoginToken(ctx, result.Token)
+		case components.AuthUserpass:
+			info, err = client.LoginUserpass(ctx, result.Username, result.Password)
+		case components.AuthLDAP:
+			info, err = client.LoginLDAP(ctx, result.Username, result.Password)
+		}
+
+		return LoginCompleteMsg{Info: info, Save: save, Err: err}
+	}
+}
+
+func (m *App) renewToken() tea.Cmd {
+	client := m.vault
+	return func() tea.Msg {
+		info, err := client.RenewToken(context.Background())
+		return TokenRenewedMsg{Info: info, Err: err}
+	}
+}
+
+func (m *App) scheduleRenewal(ttl time.Duration) tea.Cmd {
+	interval := ttl / 2
+	if interval < 10*time.Second {
+		interval = 10 * time.Second
+	}
+	return tea.Tick(interval, func(time.Time) tea.Msg {
+		return TokenRenewTickMsg{}
+	})
 }
 
 func (m *App) clearErrorAfter(d time.Duration) tea.Cmd {

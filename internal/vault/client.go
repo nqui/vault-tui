@@ -24,3 +24,11 @@ func New(addr, token string) (*Client, error) {
 func (c *Client) Addr() string {
 	return c.raw.Address()
 }
+
+func (c *Client) SetToken(token string) {
+	c.raw.SetToken(token)
+}
+
+func (c *Client) HasToken() bool {
+	return c.raw.Token() != ""
+}

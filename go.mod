@@ -1,4 +1,4 @@
-module github.com/nq/hv-tui
+module github.com/nqui/vault-tui
 
 go 1.24.4
 
