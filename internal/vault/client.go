@@ -10,15 +10,23 @@ type Client struct {
 
 func New(addr, token string) (*Client, error) {
 	cfg := vaultapi.DefaultConfig()
-	cfg.Address = addr
+	if addr != "" {
+		cfg.Address = addr
+	}
 
 	raw, err := vaultapi.NewClient(cfg)
 	if err != nil {
 		return nil, err
 	}
-	raw.SetToken(token)
+	if token != "" {
+		raw.SetToken(token)
+	}
 
 	return &Client{raw: raw}, nil
+}
+
+func (c *Client) SetAddr(addr string) {
+	_ = c.raw.SetAddress(addr)
 }
 
 func (c *Client) Addr() string {

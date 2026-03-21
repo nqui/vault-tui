@@ -94,8 +94,13 @@ func NewApp(client *vault.Client, cfg *config.Config) *App {
 	sb.ErrStyle = statusErrStyle
 
 	startView := viewSecrets
-	if !client.HasToken() {
+	if cfg.Addr == "" || !client.HasToken() {
 		startView = viewLogin
+	}
+
+	lf := components.NewLoginForm()
+	if cfg.Addr != "" {
+		lf.SetAddr(cfg.Addr)
 	}
 
 	return &App{
@@ -108,14 +113,14 @@ func NewApp(client *vault.Client, cfg *config.Config) *App {
 		picker:     components.NewPicker(),
 		wrapResult: components.NewWrapResult(),
 		wrapView:   components.NewWrapView(),
-		loginForm:  components.NewLoginForm(),
+		loginForm:  lf,
 		statusbar:  sb,
 		spinner:    sp,
 		cfg:        cfg,
 		activePane: paneTree,
 		mode:       modeBrowse,
 		view:       startView,
-		vaultAddr:  client.Addr(),
+		vaultAddr:  cfg.Addr,
 	}
 }
 
@@ -166,6 +171,9 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Cancel {
 			return m, tea.Quit
 		}
+		if msg.Addr != "" {
+			m.vault.SetAddr(msg.Addr)
+		}
 		m.loading++
 		return m, m.performLogin(msg)
 
@@ -177,11 +185,13 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.tokenInfo = msg.Info
 		m.vaultAddr = m.vault.Addr()
+		m.cfg.Addr = m.vaultAddr
 		if msg.Save {
 			m.cfg.Token = msg.Info.Token
-			if err := config.Save(m.cfg); err != nil {
-				m.setError(fmt.Errorf("failed to save config: %w", err))
-			}
+		}
+		// Always save address to config so it's remembered next launch
+		if err := config.Save(m.cfg); err != nil {
+			m.setError(fmt.Errorf("failed to save config: %w", err))
 		}
 		m.loginForm.Close()
 		m.view = viewSecrets
@@ -213,6 +223,9 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case EnginesLoadedMsg:
 		m.loading--
 		if msg.Err != nil {
+			if model, cmd, ok := m.handleAuthError(msg.Err); ok {
+				return model, cmd
+			}
 			m.setError(msg.Err)
 			return m, nil
 		}
@@ -276,6 +289,9 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SecretSavedMsg:
 		m.loading--
 		if msg.Err != nil {
+			if model, cmd, ok := m.handleAuthError(msg.Err); ok {
+				return model, cmd
+			}
 			m.setError(msg.Err)
 			return m, nil
 		}
@@ -298,6 +314,9 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SecretDeletedMsg:
 		m.loading--
 		if msg.Err != nil {
+			if model, cmd, ok := m.handleAuthError(msg.Err); ok {
+				return model, cmd
+			}
 			m.setError(msg.Err)
 			return m, nil
 		}
@@ -313,6 +332,9 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case VersionsLoadedMsg:
 		m.loading--
 		if msg.Err != nil {
+			if model, cmd, ok := m.handleAuthError(msg.Err); ok {
+				return model, cmd
+			}
 			m.setError(msg.Err)
 			return m, nil
 		}
@@ -322,6 +344,9 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SecretWrappedMsg:
 		m.loading--
 		if msg.Err != nil {
+			if model, cmd, ok := m.handleAuthError(msg.Err); ok {
+				return model, cmd
+			}
 			m.setError(msg.Err)
 			m.mode = modeBrowse
 			return m, m.clearErrorAfter(5 * time.Second)
@@ -334,6 +359,9 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SecretUnwrappedMsg:
 		m.loading--
 		if msg.Err != nil {
+			if model, cmd, ok := m.handleAuthError(msg.Err); ok {
+				return model, cmd
+			}
 			m.setError(msg.Err)
 			if m.view == viewWrap {
 				m.wrapView.SetUnwrapResult("Error: "+msg.Err.Error(), "")
@@ -894,6 +922,17 @@ func (m *App) updateSizes() {
 func (m *App) setError(err error) {
 	m.lastErr = err
 	m.statusbar.SetError(err)
+}
+
+// handleAuthError checks if an error is a permission denied (expired token)
+// and redirects to the login form. Returns true if handled.
+func (m *App) handleAuthError(err error) (tea.Model, tea.Cmd, bool) {
+	if errors.Is(err, vault.ErrPermissionDenied) {
+		m.view = viewLogin
+		m.mode = modeBrowse
+		return m, m.loginForm.Show("Session expired — please re-authenticate"), true
+	}
+	return nil, nil, false
 }
 
 func (m *App) loadEngines() tea.Cmd {

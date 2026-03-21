@@ -58,9 +58,6 @@ func Load() (*Config, error) {
 		cfg.Token = v
 	}
 
-	if cfg.Addr == "" {
-		return nil, fmt.Errorf("VAULT_ADDR is required (set in ~/.config/hv-tui/config.toml or VAULT_ADDR env var)")
-	}
 	return cfg, nil
 }
 

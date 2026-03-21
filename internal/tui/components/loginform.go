@@ -22,6 +22,7 @@ var authMethodLabels = []string{"Token", "Userpass", "LDAP"}
 
 type LoginFormResult struct {
 	Method   AuthMethod
+	Addr     string
 	Token    string
 	Username string
 	Password string
@@ -31,7 +32,8 @@ type LoginFormResult struct {
 
 // login form field indices
 const (
-	fieldMethod = iota
+	fieldAddr = iota
+	fieldMethod
 	fieldFirst  // token input or username input
 	fieldSecond // password input (userpass/ldap only)
 	fieldSave
@@ -39,6 +41,7 @@ const (
 
 type LoginFormModel struct {
 	method        AuthMethod
+	addrInput     textinput.Model
 	tokenInput    textinput.Model
 	usernameInput textinput.Model
 	passwordInput textinput.Model
@@ -51,6 +54,10 @@ type LoginFormModel struct {
 }
 
 func NewLoginForm() LoginFormModel {
+	ai := textinput.New()
+	ai.Prompt = "> "
+	ai.Placeholder = "https://vault.example.com:8200"
+
 	ti := textinput.New()
 	ti.Prompt = "> "
 	ti.Placeholder = "hvs.CAESI..."
@@ -65,11 +72,17 @@ func NewLoginForm() LoginFormModel {
 	pi.EchoMode = textinput.EchoPassword
 
 	return LoginFormModel{
+		addrInput:     ai,
 		tokenInput:    ti,
 		usernameInput: ui,
 		passwordInput: pi,
-		focusedField:  fieldFirst,
+		focusedField:  fieldAddr,
 	}
+}
+
+// SetAddr pre-fills the address field (e.g. from config).
+func (m *LoginFormModel) SetAddr(addr string) {
+	m.addrInput.SetValue(addr)
 }
 
 func (m *LoginFormModel) Show(errMsg string) tea.Cmd {
@@ -78,7 +91,11 @@ func (m *LoginFormModel) Show(errMsg string) tea.Cmd {
 	m.tokenInput.SetValue("")
 	m.usernameInput.SetValue("")
 	m.passwordInput.SetValue("")
-	m.focusedField = fieldFirst
+	if m.addrInput.Value() == "" {
+		m.focusedField = fieldAddr
+	} else {
+		m.focusedField = fieldFirst
+	}
 	return m.updateFocus()
 }
 
@@ -93,6 +110,7 @@ func (m *LoginFormModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	inputW := min(w-16, 60)
+	m.addrInput.SetWidth(inputW)
 	m.tokenInput.SetWidth(inputW)
 	m.usernameInput.SetWidth(inputW)
 	m.passwordInput.SetWidth(inputW)
@@ -100,13 +118,6 @@ func (m *LoginFormModel) SetSize(w, h int) {
 
 func (m *LoginFormModel) SetError(msg string) {
 	m.errorMsg = msg
-}
-
-func (m LoginFormModel) maxField() int {
-	if m.method == AuthToken {
-		return fieldSave - 1 // skip fieldSecond
-	}
-	return fieldSave
 }
 
 func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
@@ -120,7 +131,7 @@ func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
 	cancel := key.NewBinding(key.WithKeys("esc", "ctrl+c"))
 	left := key.NewBinding(key.WithKeys("left"))
 	right := key.NewBinding(key.WithKeys("right"))
-	space := key.NewBinding(key.WithKeys(" "))
+	space := key.NewBinding(key.WithKeys("space"))
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -136,7 +147,12 @@ func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
 			m.errorMsg = ""
 			result := LoginFormResult{
 				Method: m.method,
+				Addr:   strings.TrimSpace(m.addrInput.Value()),
 				Save:   m.save,
+			}
+			if result.Addr == "" {
+				m.errorMsg = "Vault address is required"
+				return m, nil
 			}
 			if m.method == AuthToken {
 				result.Token = m.tokenInput.Value()
@@ -178,8 +194,8 @@ func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
 			if m.method == AuthToken && m.focusedField == fieldSecond {
 				m.focusedField++
 			}
-			if m.focusedField > m.maxField()+1 { // wrap past save to method
-				m.focusedField = fieldMethod
+			if m.focusedField > fieldSave {
+				m.focusedField = fieldAddr
 			}
 			return m, m.updateFocus()
 
@@ -188,8 +204,8 @@ func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
 			if m.method == AuthToken && m.focusedField == fieldSecond {
 				m.focusedField--
 			}
-			if m.focusedField < fieldMethod {
-				m.focusedField = m.maxField() + 1 // wrap to save
+			if m.focusedField < fieldAddr {
+				m.focusedField = fieldSave
 			}
 			return m, m.updateFocus()
 		}
@@ -198,6 +214,8 @@ func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
 	// Forward to focused text input
 	var cmd tea.Cmd
 	switch m.focusedField {
+	case fieldAddr:
+		m.addrInput, cmd = m.addrInput.Update(msg)
 	case fieldFirst:
 		if m.method == AuthToken {
 			m.tokenInput, cmd = m.tokenInput.Update(msg)
@@ -259,8 +277,17 @@ func (m LoginFormModel) View() string {
 	b.WriteString(titleStyle.Render("Login to Vault"))
 	b.WriteString("\n\n")
 
-	// Method selector
+	// Vault address
 	lbl := labelStyle
+	if m.focusedField == fieldAddr {
+		lbl = focusLabelStyle
+	}
+	b.WriteString(lbl.Render("Address"))
+	b.WriteString(m.addrInput.View())
+	b.WriteString("\n\n")
+
+	// Method selector
+	lbl = labelStyle
 	if m.focusedField == fieldMethod {
 		lbl = focusLabelStyle
 	}
@@ -303,7 +330,7 @@ func (m LoginFormModel) View() string {
 
 	// Save toggle
 	lbl = labelStyle
-	if m.focusedField > m.maxField() {
+	if m.focusedField == fieldSave {
 		lbl = focusLabelStyle
 	}
 	check := "[ ]"
@@ -311,7 +338,7 @@ func (m LoginFormModel) View() string {
 		check = checkStyle.Render("[x]")
 	}
 	b.WriteString(lbl.Render("Save"))
-	b.WriteString(check + " Save to config")
+	b.WriteString(check + " Save token to config")
 	b.WriteString("\n\n")
 
 	// Error message
@@ -341,6 +368,7 @@ func (m LoginFormModel) View() string {
 }
 
 func (m *LoginFormModel) blurAll() {
+	m.addrInput.Blur()
 	m.tokenInput.Blur()
 	m.usernameInput.Blur()
 	m.passwordInput.Blur()
@@ -349,6 +377,8 @@ func (m *LoginFormModel) blurAll() {
 func (m *LoginFormModel) updateFocus() tea.Cmd {
 	m.blurAll()
 	switch m.focusedField {
+	case fieldAddr:
+		return m.addrInput.Focus()
 	case fieldFirst:
 		if m.method == AuthToken {
 			return m.tokenInput.Focus()
