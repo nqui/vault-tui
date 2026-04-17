@@ -22,7 +22,9 @@ var Active Theme
 // Set selects a theme by name and sets Active. Returns an error for unknown names.
 func Set(name string) error {
 	switch name {
-	case "tokyonight", "":
+	case "k9s", "":
+		Active = k9s()
+	case "tokyonight":
 		Active = tokyonight()
 	case "catppuccin":
 		Active = catppuccin()
@@ -31,9 +33,28 @@ func Set(name string) error {
 	case "nord":
 		Active = nord()
 	default:
-		return fmt.Errorf("unknown theme %q (valid: tokyonight, catppuccin, gruvbox, nord)", name)
+		return fmt.Errorf("unknown theme %q (valid: k9s, tokyonight, catppuccin, gruvbox, nord)", name)
 	}
 	return nil
+}
+
+func k9s() Theme {
+	return Theme{
+		Bg:       lipgloss.Color("#111116"),
+		Surface:  lipgloss.Color("#1B1C22"),
+		Overlay:  lipgloss.Color("#2C2E36"),
+		Subtle:   lipgloss.Color("#585B70"),
+		Text:     lipgloss.Color("#C8CCD8"),
+		Bright:   lipgloss.Color("#EAEDF5"),
+		Primary:  lipgloss.Color("#5FB0FC"),
+		Blue:     lipgloss.Color("#5FB0FC"),
+		Cyan:     lipgloss.Color("#4FD6BE"),
+		Green:    lipgloss.Color("#A6DA95"),
+		Yellow:   lipgloss.Color("#EED49F"),
+		Red:      lipgloss.Color("#ED8796"),
+		Orange:   lipgloss.Color("#F5A97F"),
+		CursorBg: lipgloss.Color("#262830"),
+	}
 }
 
 func tokyonight() Theme {
@@ -44,7 +65,7 @@ func tokyonight() Theme {
 		Subtle:   lipgloss.Color("#565F89"),
 		Text:     lipgloss.Color("#C0CAF5"),
 		Bright:   lipgloss.Color("#E0E0FF"),
-		Primary:  lipgloss.Color("#BB9AF7"),
+		Primary:  lipgloss.Color("#7AA2F7"),
 		Blue:     lipgloss.Color("#7AA2F7"),
 		Cyan:     lipgloss.Color("#7DCFFF"),
 		Green:    lipgloss.Color("#9ECE6A"),
@@ -63,7 +84,7 @@ func catppuccin() Theme {
 		Subtle:   lipgloss.Color("#6C7086"),
 		Text:     lipgloss.Color("#CDD6F4"),
 		Bright:   lipgloss.Color("#BAC2DE"),
-		Primary:  lipgloss.Color("#CBA6F7"),
+		Primary:  lipgloss.Color("#89B4FA"),
 		Blue:     lipgloss.Color("#89B4FA"),
 		Cyan:     lipgloss.Color("#94E2D5"),
 		Green:    lipgloss.Color("#A6E3A1"),
@@ -82,7 +103,7 @@ func gruvbox() Theme {
 		Subtle:   lipgloss.Color("#928374"),
 		Text:     lipgloss.Color("#EBDBB2"),
 		Bright:   lipgloss.Color("#FBF1C7"),
-		Primary:  lipgloss.Color("#D3869B"),
+		Primary:  lipgloss.Color("#83A598"),
 		Blue:     lipgloss.Color("#83A598"),
 		Cyan:     lipgloss.Color("#8EC07C"),
 		Green:    lipgloss.Color("#B8BB26"),
@@ -101,7 +122,7 @@ func nord() Theme {
 		Subtle:   lipgloss.Color("#616E88"),
 		Text:     lipgloss.Color("#ECEFF4"),
 		Bright:   lipgloss.Color("#E5E9F0"),
-		Primary:  lipgloss.Color("#B48EAD"),
+		Primary:  lipgloss.Color("#81A1C1"),
 		Blue:     lipgloss.Color("#81A1C1"),
 		Cyan:     lipgloss.Color("#88C0D0"),
 		Green:    lipgloss.Color("#A3BE8C"),
