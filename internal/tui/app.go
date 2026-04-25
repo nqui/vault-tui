@@ -246,8 +246,10 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			if errors.Is(msg.Err, vault.ErrPermissionDenied) {
 				m.tree.SetNodeError(msg.NodeID, components.NodeErrDenied)
+				m.detail.ShowDenied(msg.NodeID)
 			} else if errors.Is(msg.Err, vault.ErrNotFound) {
 				m.tree.SetNodeError(msg.NodeID, components.NodeErrNotFound)
+				m.detail.ShowError(msg.Err)
 			} else {
 				m.setError(msg.Err)
 				m.tree.CollapseNode(msg.NodeID)
@@ -386,7 +388,19 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.clearErrorAfter(3 * time.Second)
 
 	case components.ConfirmResult:
-		if msg.Confirmed {
+		if msg.Confirmed && msg.Context == "delete_confirm" {
+			// First confirmation passed, show final warning
+			node := m.tree.Selected()
+			if node != nil && !node.IsDir {
+				m.confirm.SetWidth(m.width / 2)
+				m.confirm.Show(
+					fmt.Sprintf("Are you sure? %q will be permanently deleted and is not recoverable.", node.FullPath),
+					"delete_final",
+				)
+				return m, nil
+			}
+		} else if msg.Confirmed && msg.Context == "delete_final" {
+			// Final confirmation passed, delete
 			node := m.tree.Selected()
 			if node != nil && !node.IsDir {
 				m.mode = modeBrowse
@@ -643,9 +657,9 @@ func (m *App) renderEditorOverlay() string {
 }
 
 func (m *App) renderConfirmOverlay() string {
-	browse := m.renderBrowse()
+	contentHeight := m.contentHeight()
 	confirm := m.confirm.View()
-	return lipgloss.JoinVertical(lipgloss.Left, browse, confirm)
+	return lipgloss.Place(m.width, contentHeight, lipgloss.Center, lipgloss.Center, confirm)
 }
 
 func (m *App) renderPickerOverlay() string {
@@ -751,7 +765,7 @@ func (m *App) updateTree(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.confirm.SetWidth(m.width / 2)
 			m.confirm.Show(
 				fmt.Sprintf("Delete secret %q?", node.FullPath),
-				node.ID,
+				"delete_confirm",
 			)
 			return m, nil
 		}

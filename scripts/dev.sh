@@ -83,8 +83,9 @@ echo "  Vault Address: $VAULT_ADDR"
 echo "  Token:         $USE_TOKEN"
 echo "====================================="
 echo ""
-read -r -p "Press enter to launch hv-tui..."
+
+read -r -p "Press enter to launch hv-tui..." || exit 0
 
 # Run hv-tui with only the address — let the login form handle auth
 unset VAULT_TOKEN
-go run .
+go run . || true

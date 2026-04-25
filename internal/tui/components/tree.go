@@ -243,11 +243,11 @@ func (m TreeModel) renderNode(node *TreeNode, selected bool) string {
 	if node.State == NodeError {
 		switch node.ErrKind {
 		case NodeErrDenied:
-			badge = "  access denied"
+			badge = ""
 		case NodeErrNotFound:
-			badge = "  not found"
+			badge = ""
 		default:
-			badge = "  error"
+			badge = ""
 		}
 	}
 

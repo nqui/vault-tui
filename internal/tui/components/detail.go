@@ -96,7 +96,7 @@ func (m *DetailModel) ShowDenied(path string) {
 
 	content := "  " + pathStyle.Render(path) + "\n" +
 		"  " + dividerStyle.Render(strings.Repeat("─", 38)) + "\n\n" +
-		"  " + iconStyle.Render("") + titleStyle.Render(" Access Denied") + "\n\n" +
+		"  " + iconStyle.Render("⚠") + " " + titleStyle.Render("Access Denied") + "\n\n" +
 		"  " + msgStyle.Render("Your token does not have permission") + "\n" +
 		"  " + msgStyle.Render("to read this secret.") + "\n\n" +
 		"  " + msgStyle.Render("Check your Vault policies or contact") + "\n" +

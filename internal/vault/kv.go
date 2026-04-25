@@ -142,7 +142,7 @@ func (c *Client) PutSecret(ctx context.Context, engine, path string, kvVersion i
 func (c *Client) DeleteSecret(ctx context.Context, engine, path string, kvVersion int) error {
 	if kvVersion == 2 {
 		kv := c.raw.KVv2(strings.TrimSuffix(engine, "/"))
-		err := kv.Delete(ctx, path)
+		err := kv.DeleteMetadata(ctx, path)
 		if err != nil {
 			return wrapError("delete", engine+path, err)
 		}
