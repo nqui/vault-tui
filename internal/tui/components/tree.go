@@ -107,6 +107,20 @@ func (m *TreeModel) SetRoots(roots []*TreeNode) {
 	m.Flatten()
 }
 
+// SelectByID moves the cursor onto the node with the given ID if it is present
+// in the current flattened (visible) list. Returns true if found.
+func (m *TreeModel) SelectByID(id string) bool {
+	for i, n := range m.flatList {
+		if n.ID == id {
+			m.cursor = i
+			m.offset = 0
+			m.fixOffset()
+			return true
+		}
+	}
+	return false
+}
+
 func (m *TreeModel) ExpandNode(nodeID string, children []*TreeNode) {
 	node := m.findNode(nodeID)
 	if node == nil {

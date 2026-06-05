@@ -25,6 +25,7 @@ type keyMap struct {
 	Wrap     key.Binding
 	Unwrap   key.Binding
 	WrapView key.Binding
+	Search   key.Binding
 }
 
 var keys = keyMap{
@@ -103,5 +104,9 @@ var keys = keyMap{
 	WrapView: key.NewBinding(
 		key.WithKeys("W"),
 		key.WithHelp("W", "wrap/unwrap view"),
+	),
+	Search: key.NewBinding(
+		key.WithKeys("/"),
+		key.WithHelp("/", "search"),
 	),
 }

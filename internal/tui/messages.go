@@ -15,6 +15,12 @@ type PathListedMsg struct {
 	Err     error
 }
 
+type SearchResultsMsg struct {
+	Engine  string
+	Entries []vault.PathEntry
+	Err     error
+}
+
 type SecretLoadedMsg struct {
 	Path   string
 	Secret *vault.SecretEntry

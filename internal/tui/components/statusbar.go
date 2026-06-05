@@ -56,6 +56,7 @@ func (m *StatusBarModel) SetHints(hints []statusHint) {
 var SecretsViewHints = []statusHint{
 	{"tab", "switch"},
 	{"enter", "open"},
+	{"/", "search"},
 	{"n", "new"},
 	{"e", "edit"},
 	{"d", "delete"},

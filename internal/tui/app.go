@@ -35,6 +35,7 @@ const (
 	modeWrapTTL
 	modeWrapResult
 	modeUnwrap
+	modeSearch
 )
 
 type appView int
@@ -59,6 +60,12 @@ type App struct {
 	picker     components.PickerModel
 	wrapResult components.WrapResultModel
 	wrapView   components.WrapViewModel
+
+	// Search
+	search       components.SearchModel
+	searchEngine string
+	searchKVVer  int
+	pendingJump  string
 
 	// Wrap state for async boundary
 	wrapEngine string
@@ -114,6 +121,7 @@ func NewApp(client *vault.Client, cfg *config.Config) *App {
 		confirm:    components.NewConfirm(),
 		prompt:     components.NewPrompt(),
 		picker:     components.NewPicker(),
+		search:     components.NewSearch(),
 		wrapResult: components.NewWrapResult(),
 		wrapView:   components.NewWrapView(),
 		loginForm:  lf,
@@ -279,7 +287,53 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.tree.ExpandNode(msg.NodeID, children)
+		if m.pendingJump != "" && msg.NodeID == m.searchEngine {
+			target := m.pendingJump
+			m.pendingJump = ""
+			if m.tree.SelectByID(target) {
+				if sel := m.tree.Selected(); sel != nil && !sel.IsDir {
+					m.detail.ShowLoading()
+					return m, m.loadSecret(sel)
+				}
+			}
+		}
 		return m, nil
+
+	case SearchResultsMsg:
+		m.loading--
+		if msg.Err != nil {
+			m.search.Close()
+			m.mode = modeBrowse
+			if model, cmd, ok := m.handleAuthError(msg.Err); ok {
+				return model, cmd
+			}
+			m.setError(msg.Err)
+			return m, m.clearErrorAfter(5 * time.Second)
+		}
+		if m.mode == modeSearch && msg.Engine == m.searchEngine {
+			m.search.SetResults(msg.Entries)
+		}
+		return m, nil
+
+	case components.SearchResult:
+		m.search.Close()
+		m.mode = modeBrowse
+		if msg.Cancelled {
+			return m, nil
+		}
+		var engineNode *components.TreeNode
+		for _, r := range m.tree.Roots {
+			if r.Engine == msg.Engine {
+				engineNode = r
+				break
+			}
+		}
+		if engineNode == nil {
+			return m, nil
+		}
+		m.pendingJump = msg.Engine + msg.Name
+		m.tree.SetNodeLoading(engineNode.ID)
+		return m, m.listPath(engineNode)
 
 	case SecretLoadedMsg:
 		m.loading--
@@ -495,6 +549,8 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePrompt(msg)
 		case modeWrapResult:
 			return m.updateWrapResult(msg)
+		case modeSearch:
+			return m.updateSearch(msg)
 		}
 
 		// Global keys
@@ -534,6 +590,8 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startQuickWrap()
 		case key.Matches(msg, keys.Unwrap):
 			return m.startQuickUnwrap()
+		case key.Matches(msg, keys.Search):
+			return m.startSearch()
 		}
 
 		if m.activePane == paneTree {
@@ -555,6 +613,10 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == modeUnwrap {
 		m.prompt, cmd = m.prompt.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+	if m.mode == modeSearch {
+		m.search, cmd = m.search.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 	m.detail, cmd = m.detail.Update(msg)
@@ -601,6 +663,8 @@ func (m *App) View() tea.View {
 		content = m.renderPromptOverlay()
 	case modeWrapResult:
 		content = m.renderWrapResultOverlay()
+	case modeSearch:
+		content = m.renderSearchOverlay()
 	default:
 		if m.view == viewWrap {
 			content = m.wrapView.View()
@@ -687,6 +751,12 @@ func (m *App) renderWrapResultOverlay() string {
 	return lipgloss.Place(m.width, contentHeight, lipgloss.Center, lipgloss.Center, result)
 }
 
+func (m *App) renderSearchOverlay() string {
+	contentHeight := m.contentHeight()
+	search := m.search.View()
+	return lipgloss.Place(m.width, contentHeight, lipgloss.Center, lipgloss.Center, search)
+}
+
 func (m *App) startQuickWrap() (tea.Model, tea.Cmd) {
 	node := m.tree.Selected()
 	if node == nil || node.IsDir {
@@ -711,6 +781,27 @@ func (m *App) startQuickUnwrap() (tea.Model, tea.Cmd) {
 	m.mode = modeUnwrap
 	m.prompt.SetWidth(m.width / 2)
 	cmd := m.prompt.Show("Unwrap Token", "hvs.CAESI...", "unwrap_token")
+	return m, cmd
+}
+
+func (m *App) startSearch() (tea.Model, tea.Cmd) {
+	node := m.tree.Selected()
+	if node == nil {
+		m.statusbar.SetMessage("No engine to search")
+		return m, m.clearErrorAfter(3 * time.Second)
+	}
+	m.searchEngine = node.Engine
+	m.searchKVVer = node.KVVer
+	m.pendingJump = ""
+	m.mode = modeSearch
+	m.search.SetSize(m.width/2, m.contentHeight())
+	showCmd := m.search.Show(node.Engine, node.KVVer)
+	return m, tea.Batch(showCmd, m.searchListEngine(node.Engine, node.KVVer))
+}
+
+func (m *App) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.search, cmd = m.search.Update(msg)
 	return m, cmd
 }
 
@@ -935,6 +1026,7 @@ func (m *App) updateSizes() {
 	m.confirm.SetWidth(m.width / 2)
 	m.prompt.SetWidth(m.width / 2)
 	m.picker.SetWidth(m.width / 3)
+	m.search.SetSize(m.width/2, m.contentHeight())
 	m.wrapResult.SetWidth(m.width * 2 / 3)
 	m.wrapView.SetSize(m.width, m.height)
 	m.loginForm.SetSize(m.width, m.height)
@@ -975,6 +1067,15 @@ func (m *App) listPath(node *components.TreeNode) tea.Cmd {
 	return func() tea.Msg {
 		entries, err := client.ListPath(context.Background(), engine, fullPath, kvVer)
 		return PathListedMsg{NodeID: nodeID, Entries: entries, Err: err}
+	}
+}
+
+func (m *App) searchListEngine(engine string, kvVer int) tea.Cmd {
+	m.loading++
+	client := m.vault
+	return func() tea.Msg {
+		entries, err := client.ListPath(context.Background(), engine, "", kvVer)
+		return SearchResultsMsg{Engine: engine, Entries: entries, Err: err}
 	}
 }
 
