@@ -3,6 +3,7 @@ package vault
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -41,16 +42,23 @@ func (c *Client) LoginToken(ctx context.Context, token string) (*TokenInfo, erro
 	return info, nil
 }
 
-func (c *Client) LoginUserpass(ctx context.Context, username, password string) (*TokenInfo, error) {
-	return c.loginCredential(ctx, "userpass", username, password)
+func (c *Client) LoginUserpass(ctx context.Context, mount, username, password string) (*TokenInfo, error) {
+	if mount == "" {
+		mount = "userpass"
+	}
+	return c.loginCredential(ctx, mount, username, password)
 }
 
-func (c *Client) LoginLDAP(ctx context.Context, username, password string) (*TokenInfo, error) {
-	return c.loginCredential(ctx, "ldap", username, password)
+func (c *Client) LoginLDAP(ctx context.Context, mount, username, password string) (*TokenInfo, error) {
+	if mount == "" {
+		mount = "ldap"
+	}
+	return c.loginCredential(ctx, mount, username, password)
 }
 
-func (c *Client) loginCredential(ctx context.Context, method, username, password string) (*TokenInfo, error) {
-	path := fmt.Sprintf("auth/%s/login/%s", method, username)
+func (c *Client) loginCredential(ctx context.Context, mount, username, password string) (*TokenInfo, error) {
+	mount = strings.Trim(mount, "/")
+	path := fmt.Sprintf("auth/%s/login/%s", mount, username)
 	secret, err := c.raw.Logical().WriteWithContext(ctx, path, map[string]interface{}{
 		"password": password,
 	})
@@ -58,7 +66,7 @@ func (c *Client) loginCredential(ctx context.Context, method, username, password
 		return nil, wrapError("login", path, err)
 	}
 	if secret == nil || secret.Auth == nil {
-		return nil, fmt.Errorf("login to %s returned no auth data", method)
+		return nil, fmt.Errorf("login to %s returned no auth data", mount)
 	}
 
 	c.raw.SetToken(secret.Auth.ClientToken)

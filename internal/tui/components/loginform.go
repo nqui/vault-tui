@@ -21,19 +21,21 @@ const (
 var authMethodLabels = []string{"Token", "Userpass", "LDAP"}
 
 type LoginFormResult struct {
-	Method   AuthMethod
-	Addr     string
-	Token    string
-	Username string
-	Password string
-	Save     bool
-	Cancel   bool
+	Method    AuthMethod
+	Addr      string
+	MountPath string
+	Token     string
+	Username  string
+	Password  string
+	Save      bool
+	Cancel    bool
 }
 
 // login form field indices
 const (
 	fieldAddr = iota
 	fieldMethod
+	fieldMount  // mount path (userpass/ldap only)
 	fieldFirst  // token input or username input
 	fieldSecond // password input (userpass/ldap only)
 	fieldSave
@@ -42,6 +44,7 @@ const (
 type LoginFormModel struct {
 	method        AuthMethod
 	addrInput     textinput.Model
+	mountInput    textinput.Model
 	tokenInput    textinput.Model
 	usernameInput textinput.Model
 	passwordInput textinput.Model
@@ -58,6 +61,10 @@ func NewLoginForm() LoginFormModel {
 	ai.Prompt = "> "
 	ai.Placeholder = "https://vault.example.com:8200"
 
+	mi := textinput.New()
+	mi.Prompt = "> "
+	mi.Placeholder = "ldap"
+
 	ti := textinput.New()
 	ti.Prompt = "> "
 	ti.Placeholder = "hvs.CAESI..."
@@ -73,6 +80,7 @@ func NewLoginForm() LoginFormModel {
 
 	return LoginFormModel{
 		addrInput:     ai,
+		mountInput:    mi,
 		tokenInput:    ti,
 		usernameInput: ui,
 		passwordInput: pi,
@@ -83,6 +91,11 @@ func NewLoginForm() LoginFormModel {
 // SetAddr pre-fills the address field (e.g. from config).
 func (m *LoginFormModel) SetAddr(addr string) {
 	m.addrInput.SetValue(addr)
+}
+
+// SetMountPath pre-fills the mount path field (e.g. from config).
+func (m *LoginFormModel) SetMountPath(mount string) {
+	m.mountInput.SetValue(mount)
 }
 
 func (m *LoginFormModel) Show(errMsg string) tea.Cmd {
@@ -111,6 +124,7 @@ func (m *LoginFormModel) SetSize(w, h int) {
 	m.height = h
 	inputW := min(w-16, 60)
 	m.addrInput.SetWidth(inputW)
+	m.mountInput.SetWidth(inputW)
 	m.tokenInput.SetWidth(inputW)
 	m.usernameInput.SetWidth(inputW)
 	m.passwordInput.SetWidth(inputW)
@@ -161,6 +175,7 @@ func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
 					return m, nil
 				}
 			} else {
+				result.MountPath = strings.TrimSpace(m.mountInput.Value())
 				result.Username = m.usernameInput.Value()
 				result.Password = m.passwordInput.Value()
 				if result.Username == "" || result.Password == "" {
@@ -190,8 +205,8 @@ func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
 
 		case key.Matches(msg, next):
 			m.focusedField++
-			// skip fieldSecond for token method
-			if m.method == AuthToken && m.focusedField == fieldSecond {
+			// token method has no mount path or password fields
+			for m.method == AuthToken && (m.focusedField == fieldMount || m.focusedField == fieldSecond) {
 				m.focusedField++
 			}
 			if m.focusedField > fieldSave {
@@ -201,7 +216,7 @@ func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
 
 		case key.Matches(msg, prev):
 			m.focusedField--
-			if m.method == AuthToken && m.focusedField == fieldSecond {
+			for m.method == AuthToken && (m.focusedField == fieldMount || m.focusedField == fieldSecond) {
 				m.focusedField--
 			}
 			if m.focusedField < fieldAddr {
@@ -216,6 +231,8 @@ func (m LoginFormModel) Update(msg tea.Msg) (LoginFormModel, tea.Cmd) {
 	switch m.focusedField {
 	case fieldAddr:
 		m.addrInput, cmd = m.addrInput.Update(msg)
+	case fieldMount:
+		m.mountInput, cmd = m.mountInput.Update(msg)
 	case fieldFirst:
 		if m.method == AuthToken {
 			m.tokenInput, cmd = m.tokenInput.Update(msg)
@@ -312,6 +329,19 @@ func (m LoginFormModel) View() string {
 		b.WriteString("\n\n")
 	} else {
 		lbl = labelStyle
+		if m.focusedField == fieldMount {
+			lbl = focusLabelStyle
+		}
+		if m.method == AuthLDAP {
+			m.mountInput.Placeholder = "ldap"
+		} else {
+			m.mountInput.Placeholder = "userpass"
+		}
+		b.WriteString(lbl.Render("Mount path"))
+		b.WriteString(m.mountInput.View())
+		b.WriteString("\n\n")
+
+		lbl = labelStyle
 		if m.focusedField == fieldFirst {
 			lbl = focusLabelStyle
 		}
@@ -369,6 +399,7 @@ func (m LoginFormModel) View() string {
 
 func (m *LoginFormModel) blurAll() {
 	m.addrInput.Blur()
+	m.mountInput.Blur()
 	m.tokenInput.Blur()
 	m.usernameInput.Blur()
 	m.passwordInput.Blur()
@@ -379,6 +410,8 @@ func (m *LoginFormModel) updateFocus() tea.Cmd {
 	switch m.focusedField {
 	case fieldAddr:
 		return m.addrInput.Focus()
+	case fieldMount:
+		return m.mountInput.Focus()
 	case fieldFirst:
 		if m.method == AuthToken {
 			return m.tokenInput.Focus()

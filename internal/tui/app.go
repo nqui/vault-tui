@@ -102,6 +102,9 @@ func NewApp(client *vault.Client, cfg *config.Config) *App {
 	if cfg.Addr != "" {
 		lf.SetAddr(cfg.Addr)
 	}
+	if cfg.MountPath != "" {
+		lf.SetMountPath(cfg.MountPath)
+	}
 
 	return &App{
 		vault:      client,
@@ -173,6 +176,10 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Addr != "" {
 			m.vault.SetAddr(msg.Addr)
+		}
+		// Remember a custom mount path for non-token methods.
+		if msg.Method != components.AuthToken {
+			m.cfg.MountPath = msg.MountPath
 		}
 		m.loading++
 		return m, m.performLogin(msg)
@@ -1089,9 +1096,9 @@ func (m *App) performLogin(result components.LoginFormResult) tea.Cmd {
 		case components.AuthToken:
 			info, err = client.LoginToken(ctx, result.Token)
 		case components.AuthUserpass:
-			info, err = client.LoginUserpass(ctx, result.Username, result.Password)
+			info, err = client.LoginUserpass(ctx, result.MountPath, result.Username, result.Password)
 		case components.AuthLDAP:
-			info, err = client.LoginLDAP(ctx, result.Username, result.Password)
+			info, err = client.LoginLDAP(ctx, result.MountPath, result.Username, result.Password)
 		}
 
 		return LoginCompleteMsg{Info: info, Save: save, Err: err}

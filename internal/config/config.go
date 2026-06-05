@@ -9,15 +9,17 @@ import (
 )
 
 type Config struct {
-	Addr  string
-	Token string
-	Theme string
+	Addr      string
+	Token     string
+	Theme     string
+	MountPath string
 }
 
 type fileConfig struct {
 	VaultAddr  string `toml:"vault_addr"`
 	VaultToken string `toml:"vault_token"`
 	Theme      string `toml:"theme"`
+	MountPath  string `toml:"mount_path"`
 }
 
 func loadFromFile() (*fileConfig, error) {
@@ -49,6 +51,7 @@ func Load() (*Config, error) {
 		cfg.Addr = fc.VaultAddr
 		cfg.Token = fc.VaultToken
 		cfg.Theme = fc.Theme
+		cfg.MountPath = fc.MountPath
 	}
 
 	if v := os.Getenv("VAULT_ADDR"); v != "" {
@@ -83,6 +86,7 @@ func Save(cfg *Config) error {
 		VaultAddr:  cfg.Addr,
 		VaultToken: cfg.Token,
 		Theme:      cfg.Theme,
+		MountPath:  cfg.MountPath,
 	}
 
 	f, err := os.Create(path)

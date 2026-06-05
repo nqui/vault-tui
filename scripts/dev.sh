@@ -27,16 +27,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Start Vault dev server
+# Start Vault dev server with a fixed root token. Pinning the token avoids
+# parsing it out of the startup banner, whose format changes between Vault
+# versions (the old `grep 'Root Token:'` broke on Vault v2.x).
 echo "==> Starting Vault dev server..."
+ROOT_TOKEN="root"
 VAULT_LOG=$(mktemp)
-vault server -dev > "$VAULT_LOG" 2>&1 &
+vault server -dev \
+  -dev-root-token-id="$ROOT_TOKEN" \
+  -dev-listen-address="127.0.0.1:8200" > "$VAULT_LOG" 2>&1 &
 VAULT_PID=$!
 
 # Wait for Vault to be ready
 export VAULT_ADDR="http://127.0.0.1:8200"
+export VAULT_TOKEN="$ROOT_TOKEN"
+ready=false
 for i in $(seq 1 30); do
   if vault status > /dev/null 2>&1; then
+    ready=true
     break
   fi
   if ! kill -0 "$VAULT_PID" 2>/dev/null; then
@@ -47,14 +55,11 @@ for i in $(seq 1 30); do
   sleep 0.2
 done
 
-# Extract root token from dev server output
-ROOT_TOKEN=$(grep 'Root Token:' "$VAULT_LOG" | awk '{print $NF}')
-if [[ -z "$ROOT_TOKEN" ]]; then
-  echo "Failed to extract root token from Vault output:"
+if [[ "$ready" != true ]]; then
+  echo "Vault did not become ready in time:"
   cat "$VAULT_LOG"
   exit 1
 fi
-export VAULT_TOKEN="$ROOT_TOKEN"
 rm -f "$VAULT_LOG"
 
 echo "==> Vault running at $VAULT_ADDR"
